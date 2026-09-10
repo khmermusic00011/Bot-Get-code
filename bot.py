@@ -8,9 +8,9 @@ from flask import Flask
 from threading import Thread
 
 # ទាញយកកូដសម្ងាត់ពី Environment Variables របស់ Render
-BOT_TOKEN = "8996123917:AAEF5WFZYpHbMY3hCUXz-UwuKnrC3pmuMdk"
-BIN_URL = "https://api.jsonbin.io/v3/b/6a397348da38895dfeecee2f"
-API_KEY = "$2a$10$xzdIby0p67uLgOoKGH3weeUwdjDRwMq91f9ofIthhlowYR7vYOUUK"
+BOT_TOKEN = ""
+BIN_URL = ""
+API_KEY = ""
 HOTMAIL_API_URL = os.environ.get("HOTMAIL_API_URL", "https://mailgen.shop/api/inbox-read")
 
 bot = telebot.TeleBot(BOT_TOKEN)
@@ -57,18 +57,19 @@ def load_email_accounts():
         print(f"Error fetching data: {e}")
     return []
 
-# --- មុខងារស្វែងរកកូដទូទៅ (ចាប់យកលេខពី ៤ ទៅ ១២ ខ្ទង់) ---
+# --- មុខងារស្វែងរកកូដទូទៅ (ចាប់យកលេខពី ៤ ទៅ ៨ ខ្ទង់) ---
 def extract_code(email_body):
-    # ស្វែងរកលេខ ៦ ខ្ទង់ ដែលស្ថិតនៅជិតពាក្យ code ឬ confirm
-    # នេះជាការការពារមិនឱ្យ Bot ចាប់យកលេខយោង ឬលេខទូរស័ព្ទមកឱ្យយើង
-    pattern = r'(?i)(?:code|confirm|is|លេខ).*?(\d{6})'
+    if not email_body:
+        return None
+    # ស្វែងរកលេខ ៤ ដល់ ៨ ខ្ទង់ ដែលស្ថិតនៅជិតពាក្យ code, confirm, is, លេខ, verification...
+    pattern = r'(?i)(?:code|confirm|is|លេខ|verification|pin|otp).*?(\d{4,8})'
     match = re.search(pattern, email_body)
     
     if match:
-        return match.group(1) # យកតែលេខ ៦ ខ្ទង់ដែលរកឃើញ
+        return match.group(1)
         
-    # បើរកមិនឃើញលេខជិតពាក្យទាំងនោះទេ សឹមត្រឡប់មករកលេខ ៦ ខ្ទង់ធម្មតា
-    match_simple = re.search(r'\b(\d{6})\b', email_body)
+    # បើរកមិនឃើញលេខជិតពាក្យទាំងនោះទេ សឹមត្រឡប់មករកលេខ ៤ ដល់ ៨ ខ្ទង់ធម្មតា
+    match_simple = re.search(r'\b(\d{4,8})\b', email_body)
     if match_simple:
         return match_simple.group(1)
         
@@ -295,4 +296,4 @@ if __name__ == "__main__":
     print("Starting Web Server...")
     keep_alive()
     print("Starting Telegram Bot...")
-    bot.infinity_polling()
+    bot.infinity_polling(skip_pending=True)
