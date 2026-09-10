@@ -8,9 +8,10 @@ from flask import Flask
 from threading import Thread
 
 # ទាញយកកូដសម្ងាត់ពី Environment Variables របស់ Render
-BOT_TOKEN = os.environ.get("BOT_TOKEN")
-BIN_URL = os.environ.get("BIN_URL")
-API_KEY = os.environ.get("API_KEY")
+BOT_TOKEN = "8996123917:AAEF5WFZYpHbMY3hCUXz-UwuKnrC3pmuMdk"
+BIN_URL = "https://api.jsonbin.io/v3/b/6a397348da38895dfeecee2f"
+API_KEY = "$2a$10$xzdIby0p67uLgOoKGH3weeUwdjDRwMq91f9ofIthhlowYR7vYOUUK"
+HOTMAIL_API_URL = os.environ.get("HOTMAIL_API_URL", "https://mailgen.shop/api/inbox-read")
 
 bot = telebot.TeleBot(BOT_TOKEN)
 
@@ -58,8 +59,20 @@ def load_email_accounts():
 
 # --- មុខងារស្វែងរកកូដទូទៅ (ចាប់យកលេខពី ៤ ទៅ ១២ ខ្ទង់) ---
 def extract_code(email_body):
-    match = re.search(r'(\d{4,12})', email_body)
-    return match.group(1) if match else None
+    # ស្វែងរកលេខ ៦ ខ្ទង់ ដែលស្ថិតនៅជិតពាក្យ code ឬ confirm
+    # នេះជាការការពារមិនឱ្យ Bot ចាប់យកលេខយោង ឬលេខទូរស័ព្ទមកឱ្យយើង
+    pattern = r'(?i)(?:code|confirm|is|លេខ).*?(\d{6})'
+    match = re.search(pattern, email_body)
+    
+    if match:
+        return match.group(1) # យកតែលេខ ៦ ខ្ទង់ដែលរកឃើញ
+        
+    # បើរកមិនឃើញលេខជិតពាក្យទាំងនោះទេ សឹមត្រឡប់មករកលេខ ៦ ខ្ទង់ធម្មតា
+    match_simple = re.search(r'\b(\d{6})\b', email_body)
+    if match_simple:
+        return match_simple.group(1)
+        
+    return None
 
 # --- មុខងារ៖ ទាញយកពី Guerrilla Mail ផ្ទាល់ ---
 def fetch_guerrilla_mail(email_address):
@@ -165,69 +178,48 @@ def fetch_latest_email(email_acc, alias_email):
         print(f"IMAP Error ({alias_email}): {e}")
         return None
         
-# --- មុខងារ៖ ទាញយកពី Outlook (គាំទ្រ OAuth2 Token និង Password ធម្មតា) ---
-def fetch_outlook(email_addr, password, token):
-    mail = None
-    try:
-        print(f"[DEBUG] កំពុងព្យាយាម Login ដោយប្រើ OAuth2 Token: {email_addr}")
-        mail = imaplib.IMAP4_SSL("outlook.office365.com")
-        
-        # បញ្ជាឱ្យប្រើ XOAUTH2 ដើម្បី Login ជាមួយ Token វែងៗ
-        auth_string = f"user={email_addr}\x01auth=Bearer {token}\x01\x01"
-        mail.authenticate('XOAUTH2', lambda x: auth_string.encode('utf-8'))
-        print("[DEBUG] OAuth2 Login ជោគជ័យ!")
-        
-    except Exception as e:
-        print(f"[DEBUG] OAuth2 បរាជ័យ ({e}), ងាកមកសាកល្បង Password ធម្មតា...")
-        try:
-            mail = imaplib.IMAP4_SSL("outlook.office365.com")
-            mail.login(email_addr, password)
-            print("[DEBUG] Password Login ជោគជ័យ!")
-        except Exception as e2:
-            print(f"[ERROR] មិនអាច Login បានទាំង ២ វិធី: {e2}")
-            return None
+# --- មុខងារ៖ ទាញយកពី Outlook/Hotmail (ប្រើប្រាស់ Inbox Read API ថ្មី) ---
+def fetch_outlook(email_addr, password=None, refresh_token=None, client_id=None):
+    if password and refresh_token and client_id:
+        email_data = f"{email_addr}|{password}|{refresh_token}|{client_id}"
+    else:
+        email_data = email_addr
 
-    # ដំណើរការឆែកអ៊ីមែល
+    print(f"[DEBUG] កំពុងស្នើសុំទាញយកសារពី Outlook/Hotmail API ({HOTMAIL_API_URL})...")
+    payload = {
+        "emailData": email_data,
+        "messageCount": 20
+    }
+    headers = {
+        "Content-Type": "application/json"
+    }
+
     try:
-        folders_to_check = ["INBOX", "Junk", '"Junk Email"']
-        for folder in folders_to_check:
-            status, _ = mail.select(folder, readonly=True)
-            if status != "OK":
-                continue
-                
-            print(f"[DEBUG] កំពុងឆែកមើលកូដក្នុង: {folder}")
-            status, data = mail.search(None, 'FROM "security@facebookmail.com"')
-            
-            if status == "OK" and data[0]:
-                latest_email_id = data[0].split()[-1]
-                status, msg_data = mail.fetch(latest_email_id, "(RFC822)")
-                
-                if status == "OK":
-                    for response_part in msg_data:
-                        if isinstance(response_part, tuple):
-                            msg = email.message_from_bytes(response_part[1])
-                            body = ""
-                            if msg.is_multipart():
-                                for part in msg.walk():
-                                    if part.get_content_type() in ["text/plain", "text/html"]:
-                                        try: body += part.get_payload(decode=True).decode(errors='ignore')
-                                        except: pass
-                            else:
-                                try: body = msg.get_payload(decode=True).decode(errors='ignore')
-                                except: pass
-                            
-                            code = extract_code(body)
-                            if code:
-                                print(f"[DEBUG] រកឃើញកូដ: {code}")
-                                mail.logout()
-                                return code
-        print("[DEBUG] រកមិនឃើញកូដទេ")
-        if mail: mail.logout()
-        return None
+        response = requests.post(HOTMAIL_API_URL, json=payload, headers=headers, timeout=15)
+        if response.status_code == 200:
+            data = response.json()
+            if data.get("success") is True or data.get("status") == "SUCCESS":
+                messages = data.get("messages", [])
+                for msg in messages:
+                    subject = msg.get("subject", "")
+                    preview = msg.get("preview", "")
+                    # ស្វែងរកកូដក្នុង subject ឬ preview
+                    code = extract_code(f"{subject} {preview}")
+                    if code:
+                        print(f"[DEBUG] ទាញយកកូដបានជោគជ័យ: {code}")
+                        return code
+                print("[DEBUG] ចូលបានជោគជ័យ តែមិនទាន់មានកូដក្នុងសារទេ")
+                return None
+            else:
+                print(f"[DEBUG] API ត្រឡប់ Error: {data.get('error')}")
+                return None
+        else:
+            print(f"[DEBUG] API Response Error Code ({response.status_code}): {response.text}")
+            return None
     except Exception as e:
-        print(f"[ERROR] បញ្ហាទាញយកកូដ: {e}")
-        if mail: mail.logout()
+        print(f"[ERROR] Error ពេលហៅ Outlook/Hotmail API: {e}")
         return None
+
         
 # --- Telegram Bot Commands (ប្រព័ន្ធទទួលសារ) ---
 @bot.message_handler(commands=['start'])
@@ -250,17 +242,18 @@ def get_code_from_mail(message):
     # ២. ករណី Outlook/Hotmail (ទម្រង់ពេញ)
     if len(parts) >= 4:
         password = parts[1].strip()
-        token = parts[2].strip()      # ប្រអប់ទី ៣ នេះជា Token (M.C508...) 
-        client_id = parts[3].strip()  # ប្រអប់ទី ៤ ជា Client ID
+        refresh_token = parts[2].strip()  # នេះគឺជា Refresh Token
+        client_id = parts[3].strip()      # នេះជា Client ID
         
-        # ហៅមុខងារ Outlook ដោយបញ្ជូន Token ទៅឱ្យវាប្រើ
-        code = fetch_outlook(alias_email, password, token)
+        # បញ្ជូនទិន្នន័យទាំងអស់ទៅកាន់ fetch_outlook
+        code = fetch_outlook(alias_email, password, refresh_token, client_id)
         
         if code:
             bot.reply_to(message, f"✅ កូដ Outlook របស់អ្នកគឺ: `{code}`", parse_mode="Markdown")
         else:
             bot.reply_to(message, "❌ រកមិនឃើញកូដទេ (សូមឆែកមើល Logs ក្នុង Render ដើម្បីដឹងពីបញ្ហា)")
         return
+    
     # ៣. ករណី Guerrilla Mail (ទម្រង់: mail)
     domain = alias_email.split("@")[1]
     if domain in GUERRILLA_DOMAINS:
