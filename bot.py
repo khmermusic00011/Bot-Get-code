@@ -8,9 +8,9 @@ from flask import Flask
 from threading import Thread
 
 # ទាញយកកូដសម្ងាត់ពី Environment Variables របស់ Render
-BOT_TOKEN = ""
-BIN_URL = ""
-API_KEY = ""
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
+BIN_URL = os.environ.get("BIN_URL", "")
+API_KEY = os.environ.get("API_KEY", "")
 HOTMAIL_API_URL = os.environ.get("HOTMAIL_API_URL", "https://mailgen.shop/api/inbox-read")
 
 bot = telebot.TeleBot(BOT_TOKEN)
